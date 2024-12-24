@@ -1,0 +1,31 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: 'LSTM Model of Snow Water Equivalent (SWE) '
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Madeleine
+    family-names: Burns
+    email: mcburns@princeton.edu
+    affiliation: Princeton University
+    orcid: 'https://orcid.org/0000-0002-8116-639X'
+repository-code: 'https://github.com/madeleineburns/swe-lstm'
+abstract: >-
+  The code in this repository trains and tests an LSTM model
+  of snow water equivalent (SWE), evaluates the model's
+  sensitivity and transferability, and compares the accuracy
+  of its predictions to ParFlow-CLM and the University of
+  Arizona SWE model. 
+keywords:
+  - snow water equivalent
+  - SWE
+  - LSTM
+  - machine learning
+  - mountain hydrology
+  - snow
+  - ParFlow-CLM
+date-released: '2024-12-24'
