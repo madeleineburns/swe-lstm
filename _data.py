@@ -639,7 +639,7 @@ def nse(actual, predictions):
 
 ## ANALYZE DATA ##
 # for LSTM model
-def analyze_results_lstm(model, metadata, test_swe, test_non_swe, scaler_swe, gen_plot, nonzero_swe):
+def analyze_results_lstm(model, metadata, test_swe, test_non_swe, scaler_swe, gen_plot):
     # # load files from model run - ADD THIS
     # model = torch.load(run_name+'_lstm.pt', map_location = DEVICE)
     # test_swe = torch.load(run_name + '_test_swe.pt')
@@ -679,12 +679,6 @@ def analyze_results_lstm(model, metadata, test_swe, test_non_swe, scaler_swe, ge
         # inverse transform to produce swe values
         swe_pred = scaler_swe.inverse_transform(swe_pred.cpu().detach().numpy().reshape(-1,1))
         swe_actual = scaler_swe.inverse_transform(test_swe_tensors.detach().numpy())
-
-        # filter to only nonzero observational SWE values
-        if nonzero_swe:
-            zero_indexes = np.where(swe_actual != 0)[0]
-            swe_actual = swe_actual[zero_indexes]
-            swe_pred = swe_pred[zero_indexes]
     
         # peak swe
         peak_lstm = max(swe_pred)
@@ -750,6 +744,137 @@ def analyze_results_lstm(model, metadata, test_swe, test_non_swe, scaler_swe, ge
     full = np.stack(l_features).astype(np.float32)
 
     return statistics, full
+
+
+# for LSTM model
+# return statistics for each phase: nonzero, accumulation, melting
+def analyze_results_lstm_phase(model, metadata, test_swe, test_non_swe, scaler_swe, gen_plot):
+    num_years = len(metadata)
+    statistics = pd.DataFrame(0.0, index=np.arange(num_years), columns=['rmse', 'normal rmse', 'nse', 'r2', 'spearman_rho'])
+    statistics_accum = pd.DataFrame(0.0, index=np.arange(num_years), columns=['rmse', 'normal rmse', 'nse', 'r2', 'spearman_rho'])
+    statistics_melt = pd.DataFrame(0.0, index=np.arange(num_years), columns=['rmse', 'normal rmse', 'nse', 'r2', 'spearman_rho'])
+    
+    if gen_plot: 
+        plt.figure(figsize=(32,24))
+
+    for i in range(0, num_years):
+        site_id = metadata['site_id'][i]
+        year = metadata['site_id'][i]
+        test_swe_tensors = test_swe[i]
+        test_non_swe_tensors = test_non_swe[i].to(DEVICE)
+        test_non_swe_tensors = torch.reshape(test_non_swe_tensors, (test_non_swe_tensors.shape[0], 1, test_non_swe_tensors.shape[1]))
+    
+        # predict 
+        swe_pred = model(test_non_swe_tensors)
+    
+        # inverse transform to produce swe values
+        swe_pred = scaler_swe.inverse_transform(swe_pred.cpu().detach().numpy().reshape(-1,1))
+        swe_actual = scaler_swe.inverse_transform(test_swe_tensors.detach().numpy())
+
+        ## NONZERO SWE STATISTICS ##
+        # filter to only nonzero observational SWE values
+        zero_indexes = np.where(swe_actual != 0)[0]
+        swe_actual = swe_actual[zero_indexes]
+        swe_pred = swe_pred[zero_indexes]
+
+        # peak swe
+        peak_lstm = max(swe_pred)
+        peak_obs = max(swe_actual)
+        peak = (peak_lstm + peak_obs)/2
+    
+        # calculate RMSE
+        mse = mean_squared_error(swe_actual, swe_pred)
+        rmse = np.sqrt(mse)
+        statistics.loc[i, 'rmse'] = rmse
+        statistics.loc[i, 'normal rmse'] = rmse / peak
+    
+        # calculate NSE
+        nash_sut = nse(swe_actual, swe_pred)
+        statistics.loc[i, 'nse'] = nash_sut
+    
+        # calculate r2
+        r_2 = r2_score(swe_actual, swe_pred)
+        statistics.loc[i, 'r2'] = r_2
+    
+        # calculate Spearman's rho
+        spearman_rho = stats.spearmanr(swe_actual, swe_pred)
+        statistics.loc[i, 'spearman_rho'] = spearman_rho[0]
+
+        
+        ## SWE STATISTICS FOR ACCUMULATION AND MELT ##
+        # break down SWE into accumulation and melt periods - TEST
+        peak_index = np.argmax(swe_actual)
+        swe_actual_accum = swe_actual[:peak_index]
+        swe_pred_accum = swe_pred[:peak_index]
+        swe_actual_melt = swe_actual[peak_index + 1:]
+        swe_pred_melt = swe_pred[peak_index + 1:]
+        
+        if(len(swe_pred_melt) == 0): 
+            statistics_melt.loc[i, 'rmse'] = np.nan
+            statistics_melt.loc[i, 'normal rmse'] = np.nan
+            statistics_melt.loc[i, 'nse'] = np.nan
+            statistics_melt.loc[i, 'r2'] = np.nan
+            statistics_melt.loc[i, 'spearman_rho'] = np.nan
+        else:
+            # calculate RMSE
+            rmse_melt = np.sqrt(mean_squared_error(swe_actual_melt, swe_pred_melt))
+            statistics_melt.loc[i, 'rmse'] = rmse_melt
+            statistics_melt.loc[i, 'normal rmse'] = rmse_melt / peak
+
+            # calculate NSE
+            nash_sut_melt = nse(swe_actual_melt, swe_pred_melt)
+            statistics_melt.loc[i, 'nse'] = nash_sut_melt
+
+            # calculate r2
+            r_2_melt = r2_score(swe_actual_melt, swe_pred_melt)
+            statistics_melt.loc[i, 'r2'] = r_2_melt
+
+            # calculate Spearman's rho
+            spearman_rho_melt = stats.spearmanr(swe_actual_melt, swe_pred_melt)
+            statistics_melt.loc[i, 'spearman_rho'] = spearman_rho_melt[0]
+
+        if(len(swe_pred_accum) == 0): 
+            statistics_accum.loc[i, 'rmse'] = np.nan
+            statistics_accum.loc[i, 'normal rmse'] = np.nan
+            statistics_accum.loc[i, 'nse'] = np.nan
+            statistics_accum.loc[i, 'r2'] = np.nan
+            statistics_accum.loc[i, 'spearman_rho'] = np.nan
+        else:
+            # calculate RMSE
+            rmse_accum = np.sqrt(mean_squared_error(swe_actual_accum, swe_pred_accum))
+            statistics_accum.loc[i, 'rmse'] = rmse_accum
+            statistics_accum.loc[i, 'normal rmse'] = rmse_accum / peak
+        
+            # calculate NSE
+            nash_sut_accum = nse(swe_actual_accum, swe_pred_accum)
+            statistics_accum.loc[i, 'nse'] = nash_sut_accum
+        
+            # calculate r2
+            r_2_accum = r2_score(swe_actual_accum, swe_pred_accum)
+            statistics_accum.loc[i, 'r2'] = r_2_accum
+        
+            # calculate Spearman's rho
+            spearman_rho_accum = stats.spearmanr(swe_actual_accum, swe_pred_accum)
+            statistics_accum.loc[i, 'spearman_rho'] = spearman_rho_accum[0]
+        
+
+        ## PLOT ##
+        # plot first 36 years at 9 sites if boolean is true
+        if gen_plot and (i < 36):
+            plt.subplot(6, 6, i+1)
+            # blue is actual, red is predicted
+            plt.plot(swe_pred, label='predicted swe', c='red')
+            plt.plot(swe_actual, label='actual swe', c='blue')
+            plt.axvline(x=peak_index, color='black', linestyle='--')
+            plt.title(site_id + ': '+ str(year))
+            #plt.title(f'{test_years['years'][y]:.0f}: RMSE: {rmse:.2f}') 
+            plt.xlabel('days in WY')
+            plt.ylabel('SWE [mm]')
+
+    if gen_plot:
+        plt.tight_layout()
+
+    return statistics, statistics_accum, statistics_melt
 
 
 ## PRINT AND VISUALIZE FEATURE IMPORTANCES ##
@@ -1224,12 +1349,7 @@ def prod_swe(site_id, year):
 
 ## ANALYZE DATA ##
 # for PFCLM and UA SWE model
-def analyze_results_pfclm(swe_model, swe_actual, site_id, year, nonzero_swe):
-    # filter to only nonzero observational SWE values if desired
-    if nonzero_swe:
-        zero_indexes = np.where(swe_actual != 0)[0]
-        swe_actual = swe_actual[zero_indexes]
-        swe_model = swe_model[zero_indexes]
+def analyze_results_pfclm(swe_model, swe_actual, site_id, year):
             
     statistics = pd.DataFrame(columns=['rmse', 'normal rmse', 'nse', 'r2', 'spearman_rho', 'delta peak', 'normal delta peak', 'abs delta peak', 
                                        'normal abs delta peak', 'delta days', 'abs delta days'])
@@ -1263,21 +1383,99 @@ def analyze_results_pfclm(swe_model, swe_actual, site_id, year, nonzero_swe):
     melt_lstm = np.where(arr_lstm > 100)[0]
     melt_obs = np.where(arr_obs > 100)[0]
     # calculate ABSOLUTE difference in first melt day
-    if nonzero_swe:
-        statistics.loc[i, 'delta days'] = 0
-        statistics.loc[i, 'abs delta days'] = 0
-    else:
-        try:
-            delta_days = arr_lstm[melt_lstm[0]] - arr_obs[melt_obs[0]]
-            abs_delta_days = np.abs(arr_lstm[melt_lstm[0]] - arr_obs[melt_obs[0]])
-        except:
-            delta_days = 365 - arr_obs[melt_obs[0]]
-            abs_delta_days = np.abs(365 - arr_obs[melt_obs[0]])
+    try:
+        delta_days = arr_lstm[melt_lstm[0]] - arr_obs[melt_obs[0]]
+        abs_delta_days = np.abs(arr_lstm[melt_lstm[0]] - arr_obs[melt_obs[0]])
+    except:
+        delta_days = 365 - arr_obs[melt_obs[0]]
+        abs_delta_days = np.abs(365 - arr_obs[melt_obs[0]])
 
     statistics.loc[len(statistics)] = [rmse, rmse / peak, nash_sut, r_2, spearman_rho[0], delta_peak, delta_peak/peak, abs_delta_peak, 
                                        abs_delta_peak/peak, delta_days, abs_delta_days]
     
     return statistics
+
+## ANALYZE DATA BY SNOWPACK PHASE ##
+# for PFCLM and UA SWE model
+# returns nonzero SWE statistics and statistics for accumulation and melt
+def analyze_results_pfclm_phase(swe_model, swe_actual, site_id, year):
+    statistics = pd.DataFrame(columns=['rmse', 'normal rmse', 'nse', 'r2', 'spearman_rho'])
+    statistics_accum = pd.DataFrame(columns=['rmse', 'normal rmse', 'nse', 'r2', 'spearman_rho'])
+    statistics_melt = pd.DataFrame(columns=['rmse', 'normal rmse', 'nse', 'r2', 'spearman_rho'])
+
+    ## NONZERO SWE STATISTICS ##
+    # filter to only nonzero observational SWE values
+    zero_indexes = np.where(swe_actual != 0)[0]
+    swe_actual = swe_actual[zero_indexes]
+    swe_model = swe_model[zero_indexes]
+    
+    # peak swe
+    peak_model = max(swe_model)
+    peak_obs = max(swe_actual)
+    peak = (peak_model + peak_obs)/2
+
+    # calculate RMSE
+    rmse = np.sqrt(mean_squared_error(swe_actual, swe_model))
+
+    # calculate NSE
+    nash_sut = nse(swe_actual, swe_model)
+
+    # calculate r2
+    r_2 = r2_score(swe_actual, swe_model)
+
+    # calculate Spearman's rho
+    spearman_rho = stats.spearmanr(swe_actual, swe_model)
+
+    # compile statistics
+    statistics.loc[len(statistics)] = [rmse, rmse / peak, nash_sut, r_2, spearman_rho[0]]
+
+    
+    ## SWE STATISTICS FOR ACCUMULATION AND MELT ##
+    # break down SWE into accumulation and melt periods - TEST
+    peak_index = np.argmax(swe_actual)
+    swe_actual_accum = swe_actual[:peak_index]
+    swe_model_accum = swe_model[:peak_index]
+    swe_actual_melt = swe_actual[peak_index + 1:]
+    swe_model_melt = swe_model[peak_index + 1:]
+    
+    if(len(swe_model_melt) == 0): 
+        statistics_melt.loc[len(statistics_melt)] = [np.nan, np.nan, np.nan, np.nan, np.nan]
+    else:
+        # calculate RMSE
+        rmse_melt = np.sqrt(mean_squared_error(swe_actual_melt, swe_model_melt))
+
+        # calculate NSE
+        nash_sut_melt = nse(swe_actual_melt, swe_model_melt)
+        
+        # calculate r2
+        r_2_melt = r2_score(swe_actual_melt, swe_model_melt)
+
+        # calculate Spearman's rho
+        spearman_rho_melt = stats.spearmanr(swe_actual_melt, swe_model_melt)
+
+        # compile
+        statistics_melt.loc[len(statistics_melt)] = [rmse_melt, rmse_melt/peak, nash_sut_melt, r_2_melt, spearman_rho_melt[0]]
+
+    if(len(swe_model_accum) == 0): 
+        statistics_accum.loc[len(statistics_accum)] = [np.nan, np.nan, np.nan, np.nan, np.nan]
+    else:
+        # calculate RMSE
+        rmse_accum = np.sqrt(mean_squared_error(swe_actual_accum, swe_model_accum))
+        
+        # calculate NSE
+        nash_sut_accum = nse(swe_actual_accum, swe_model_accum)
+        
+        # calculate r2
+        r_2_accum = r2_score(swe_actual_accum, swe_model_accum)
+        
+        # calculate Spearman's rho
+        spearman_rho_accum = stats.spearmanr(swe_actual_accum, swe_model_accum)
+
+        # compile
+        statistics_accum.loc[len(statistics_accum)] = [rmse_accum, rmse_accum/peak, nash_sut_accum, r_2_accum, spearman_rho_accum[0]]
+        
+    
+    return statistics, statistics_accum, statistics_melt
 
     
     
