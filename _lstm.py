@@ -30,7 +30,7 @@ num_layers = 2            # number of stacked lstm layers
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 ## DEFINE LSTM ##
-# from https://cnvrg.io/pytorch-lstm/ 
+# adapted from https://cnvrg.io/pytorch-lstm/ 
 class LSTM(nn.Module):
     def __init__(self, input_size, batch_size, output_size, hidden_size, num_layers):
         super(LSTM, self).__init__()
@@ -48,7 +48,7 @@ class LSTM(nn.Module):
         self.relu = nn.ReLU()
     
     def forward(self,x):
-        # flatten parameters - figure this out
+        # flatten parameters
         self.lstm.flatten_parameters()
         
         # establish initial layers, send to device
@@ -59,9 +59,8 @@ class LSTM(nn.Module):
         
         # propagate input through LSTM
         output, (hn, cn) = self.lstm(x, (h_0, c_0)) #lstm with input, hidden, and internal state
-        out = self.relu(output) # experimental relu layer???
-        out = self.fc(out)
-        #out = self.relu(out)   # trying to get negative output to be projected to 0
+        out = self.relu(output) # experimental relu layer
+        out = self.fc(out) # linear layer to translate output
         return out
         #return out.view(-1)
 
